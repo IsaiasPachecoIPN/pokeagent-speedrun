@@ -283,6 +283,11 @@ class PokemonEmeraldEnv(gym.Env):
                 logger.info(f"📝 Captured dialogue at {location}: {dialog[:50]}...")
                 self.captured_dialogues.add(dialog)  # Track to avoid duplicates
         
+        # 🆕 Check location-based objectives periodically
+        # Read actual location from memory and verify if objectives are completed
+        if self.enable_dialogue_capture and self.objectives_manager and self.current_step % 20 == 0:
+            self._check_location_objectives()
+        
         return observation, reward, terminated, truncated, info
     
     def _extract_observation(self, game_state: Dict[str, Any]) -> Dict[str, np.ndarray]:
@@ -857,6 +862,41 @@ class PokemonEmeraldEnv(gym.Env):
         """Set directional reward multiplier (from callback)."""
         self.directional_multiplier = multiplier
         self.directional_advice = advice
+    
+    def _check_location_objectives(self):
+        """
+        🆕 Read current location from memory and check if it completes any objectives.
+        
+        This method:
+        1. Reads the actual map location from memory (map_bank, map_number)
+        2. Gets the location name (e.g., "LITTLEROOT TOWN")
+        3. Calls objectives_manager to check if any location-based objectives are completed
+        
+        Called every 20 steps from step() method.
+        """
+        try:
+            if not hasattr(self.emulator, 'memory_reader'):
+                return
+            
+            memory_reader = self.emulator.memory_reader
+            
+            # Read raw map coordinates
+            map_bank = memory_reader._read_u8(memory_reader.addresses.MAP_BANK)
+            map_number = memory_reader._read_u8(memory_reader.addresses.MAP_NUMBER)
+            
+            # Read location name (uses MapLocation enum internally)
+            location_name = memory_reader.read_location()
+            
+            # Check if this location completes any objectives
+            if self.objectives_manager and location_name:
+                self.objectives_manager.check_location_objectives(
+                    location_name=location_name,
+                    map_bank=map_bank,
+                    map_number=map_number
+                )
+                
+        except Exception as e:
+            logger.debug(f"Failed to check location objectives: {e}")
     
     # 🆕 Hybrid DRL+LLM methods
     def enable_hybrid_mode(self, objectives_manager):

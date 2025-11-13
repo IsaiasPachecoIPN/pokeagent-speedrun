@@ -249,6 +249,53 @@ class ObjectivesManager:
                         logger.info(f"✅ Objective '{obj.name}' completed ({matched_keywords}/{min_interactions} interactions)")
                         self.complete_objective(obj_id)
     
+    def check_location_objectives(self, location_name: str, map_bank: int = None, map_number: int = None):
+        """
+        Check if current location completes any objectives.
+        
+        Args:
+            location_name: Name of the current location (e.g., "LITTLEROOT TOWN")
+            map_bank: Raw map bank value (optional)
+            map_number: Raw map number value (optional)
+        """
+        if not location_name:
+            return
+        
+        location_upper = location_name.upper()
+        
+        for obj_id, obj in self.objectives.items():
+            if obj.completed:
+                continue
+            
+            # Check location-based objectives
+            if obj.type == 'location':
+                target = obj.target
+                
+                # Method 1: Check by location name keywords
+                if isinstance(target, dict) and 'keywords' in target:
+                    keywords = target['keywords']
+                    any_match = target.get('any_match', True)  # Default to any_match for locations
+                    
+                    if any_match:
+                        # Complete if ANY keyword matches location
+                        if any(keyword.upper() in location_upper for keyword in keywords):
+                            logger.info(f"✅ Objective '{obj.name}' completed by reaching location: '{location_name}'")
+                            self.complete_objective(obj_id)
+                
+                # Method 2: Check by exact location name match
+                elif isinstance(target, dict) and 'location' in target:
+                    target_location = target['location'].upper()
+                    if target_location in location_upper or location_upper in target_location:
+                        logger.info(f"✅ Objective '{obj.name}' completed by reaching: '{location_name}'")
+                        self.complete_objective(obj_id)
+                
+                # Method 3: Check by map coordinates (if provided)
+                elif isinstance(target, dict) and 'map_bank' in target and map_bank is not None:
+                    if (target.get('map_bank') == map_bank and 
+                        target.get('map_number') == map_number):
+                        logger.info(f"✅ Objective '{obj.name}' completed by reaching map {map_bank:02X}_{map_number:02X}")
+                        self.complete_objective(obj_id)
+    
     def reset(self, keep_dialogues: bool = False):
         """
         Reset objectives to default state.
