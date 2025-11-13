@@ -1,0 +1,106 @@
+{
+  "objectives": {
+    "exit_starting_room": {
+      "id": "exit_starting_room",
+      "name": "Exit Starting Room",
+      "description": "Leave the starting room and explore Littleroot Town",
+      "type": "location",
+      "target": {
+        "map": "LITTLEROOT_TOWN",
+        "condition": "different_from_start"
+      },
+      "reward_weight": 2.0,
+      "completed": false,
+      "progress": 0.0,
+      "created_at": "2025-11-13T12:56:07.776931",
+      "completed_at": null
+    }
+  },
+  "dialogue_history": [
+    {
+      "text": "Oh, yes.\ufffdOne of DAD\u2019s friends lives in town.\ufffdPROF. BIRCH is his name.\ufffdHe lives right next door, so you should\ufffdgo over and introduce yourself.",
+      "npc": null,
+      "location": "Unknown",
+      "timestamp": "2025-11-13T12:56:11.755839"
+    },
+    {
+      "text": "Um, um, um!\ufffdIf you go outside and go in the grass,\ufffdwild POK\u00e9MON will jump out!",
+      "npc": null,
+      "location": "Unknown",
+      "timestamp": "2025-11-13T12:56:49.065502"
+    },
+    {
+      "text": "JOHNNY\u2019s HOUSE",
+      "npc": null,
+      "location": "Unknown",
+      "timestamp": "2025-11-13T12:56:55.548258"
+    },
+    {
+      "text": "PROF. BIRCH\u2019S POK\u00e9MON LAB",
+      "npc": null,
+      "location": "Unknown",
+      "timestamp": "2025-11-13T13:01:31.629105"
+    },
+    {
+      "text": "It\u2019s a book that\u2019s too hard to read.",
+      "npc": null,
+      "location": "Unknown",
+      "timestamp": "2025-11-13T13:01:59.272488"
+    },
+    {
+      "text": "It\u2019s crammed with books on POK\u00e9MON.",
+      "npc": null,
+      "location": "Unknown",
+      "timestamp": "2025-11-13T13:02:10.622483"
+    },
+    {
+      "text": "It\u2019s a PC used for research.\ufffdBetter not mess around with it.",
+      "npc": null,
+      "location": "Unknown",
+      "timestamp": "2025-11-13T13:04:54.320455"
+    },
+    {
+      "text": "Hunh? PROF. BIRCH?\ufffdThe PROF\u2019s away on fieldwork.\ufffdErgo, he isn\u2019t here.\ufffdOh, let me explain what fieldwork is.\ufffdIt is to study things in the natural\ufffdenvironment, like fields and mountains,\ufffdinstead of a laboratory.\ufffdThe PROF isn\u2019t one for doing desk work.\ufffdHe\u2019s the type of person who would\ufffdrather go outside and experience\ufffdthings than read about them here.",
+      "npc": null,
+      "location": "Unknown",
+      "timestamp": "2025-11-13T13:08:54.971968"
+    },
+    {
+      "text": "The PROF isn\u2019t one for doing desk work.\ufffdHe\u2019s the type of person who would\ufffdrather go outside and experience\ufffdthings than read about them here.",
+      "npc": null,
+      "location": "Unknown",
+      "timestamp": "2025-11-13T13:09:29.121696"
+    },
+    {
+      "text": "If you use a PC, you can store items\ufffdand POK\u00e9MON.\ufffdThe power of science is staggering!",
+      "npc": null,
+      "location": "Unknown",
+      "timestamp": "2025-11-13T13:13:46.032312"
+    },
+    {
+      "text": "Oh, hello. And you are?\ufffd\u2026 \u2026 \u2026 \u2026 \u2026 \u2026 \u2026 \u2026 \u2026\ufffd\u2026 \u2026 \u2026 \u2026 \u2026 \u2026 \u2026 \u2026 \u2026\ufffdOh, you\u2019re JOHNNY, our new next-door\ufffdneighbor! Hi!\ufffdWe have a daughter about the same\ufffdage as you.\ufffdOur daughter was excited about making\ufffda new friend.\ufffdOur daughter is upstairs, I think.",
+      "npc": null,
+      "location": "Unknown",
+      "timestamp": "2025-11-13T13:14:24.277460"
+    },
+    {
+      "text": "Oh, yes.\ufffdOne of DAD\u2019s friends lives in town.\ufffdPROF. BIRCH is his name.\ufffdHe lives right next door, so you should\ufffdgo over and introduce yourself.",
+      "npc": null,
+      "location": "Unknown",
+      "timestamp": "2025-11-13T13:16:56.569666"
+    },
+    {
+      "text": "Um, um, um!\ufffdIf you go outside and go in the grass,\ufffdwild POK\u00e9MON will jump out!",
+      "npc": null,
+      "location": "Unknown",
+      "timestamp": "2025-11-13T13:17:44.366122"
+    },
+    {
+      "text": "It\u2019s dangerous if you don\u2019t have\ufffdyour own POK\u00e9MON.",
+      "npc": null,
+      "location": "Unknown",
+      "timestamp": "2025-11-13T13:17:47.045958"
+    }
+  ],
+  "last_updated": "2025-11-13T13:17:47.046081"
+}

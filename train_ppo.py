@@ -195,7 +195,8 @@ def train_ppo(
     n_envs: int = 1,  # Number of parallel environments
     visualize: bool = False,  # If True, show pygame window (only works with n_envs=1)
     use_llm: bool = False,  # 🆕 Enable LLM-based reward shaping
-    pure_drl: bool = False  # 🆕 Pure DRL mode (no reward shaping at all)
+    pure_drl: bool = False,  # 🆕 Pure DRL mode (no reward shaping at all)
+    hybrid_mode: bool = False  # 🆕 Hybrid DRL+LLM with tool calling
 ):
     """
     Train a PPO agent on Pokemon Emerald.
@@ -219,8 +220,13 @@ def train_ppo(
         n_envs = 1
     
     # Validate conflicting flags
-    if use_llm and pure_drl:
-        logger.warning("⚠️  Cannot use --use-llm and --pure-drl together. Using --pure-drl (no reward shaping).")
+    if (use_llm or hybrid_mode) and pure_drl:
+        logger.warning("⚠️  Cannot use --use-llm/--hybrid and --pure-drl together. Using --pure-drl (no reward shaping).")
+        use_llm = False
+        hybrid_mode = False
+    
+    if hybrid_mode and use_llm:
+        logger.warning("⚠️  Both --hybrid and --use-llm specified. Using --hybrid mode (tool calling).")
         use_llm = False
     
     # Create directories
@@ -240,6 +246,8 @@ def train_ppo(
     # 🆕 Mostrar modo de entrenamiento
     if pure_drl:
         logger.info(f"Training Mode: 🔵 PURE DRL (no reward shaping)")
+    elif hybrid_mode:
+        logger.info(f"Training Mode: 🚀 HYBRID DRL+LLM (tool calling, dynamic objectives)")
     elif use_llm:
         logger.info(f"Training Mode: 🤖 LLM + Dialogue-based reward shaping")
     else:
@@ -277,7 +285,45 @@ def train_ppo(
     callbacks.append(checkpoint_callback)
     
     # 🆕 REWARD SHAPING CALLBACKS - Configurables según modo
-    if not pure_drl:
+    if hybrid_mode:
+        # Hybrid DRL+LLM callback with tool calling
+        from agent.hybrid_llm_callback import HybridLLMCallback
+        from agent.objectives_manager import ObjectivesManager
+        
+        # Initialize objectives manager
+        objectives_manager = ObjectivesManager("agent/current_objectives.json")
+        
+        # 🆕 Reset objectives to start fresh each training run
+        # Keep dialogues so LLM can learn from accumulated story context
+        objectives_manager.reset(keep_dialogues=True)  # Keep dialogue history across runs
+        logger.info(f"🧹 Objectives reset - starting with {len(objectives_manager.dialogue_history)} dialogues from history")
+        
+        # Enable hybrid mode on all environments
+        logger.info(f"Enabling hybrid mode on {n_envs} environment(s)...")
+        for i in range(n_envs):
+            if hasattr(env, 'env_method'):
+                # For SubprocVecEnv
+                env.env_method('enable_hybrid_mode', objectives_manager, indices=[i])
+            else:
+                # For DummyVecEnv - need to access unwrapped env
+                try:
+                    actual_env = env.envs[i].unwrapped if hasattr(env, 'envs') else env.unwrapped
+                    actual_env.enable_hybrid_mode(objectives_manager)
+                except Exception as e:
+                    logger.warning(f"Failed to enable hybrid mode on env {i}: {e}")
+        
+        hybrid_callback = HybridLLMCallback(
+            check_frequency=2000,  # Check every 5000 steps (~few episodes)
+            llm_model="qwen3:8b",
+            objectives_file="agent/current_objectives.json",
+            log_dir="logs/llm_responses",  # 🆕 Save LLM responses here
+            verbose=1
+        )
+        callbacks.append(hybrid_callback)
+        logger.info("🚀 Hybrid DRL+LLM mode enabled - LLM will set objectives dynamically!")
+        logger.info("📁 LLM responses will be saved to: logs/llm_responses/")
+        
+    elif not pure_drl:
         # LLM reward shaping callback
         llm_callback = LLMRewardCallback(
             check_frequency=500,  # Check every 500 steps para análisis LLM
@@ -475,6 +521,8 @@ if __name__ == "__main__":
                         help="Enable LLM-based reward shaping with dialogue reading (requires Ollama)")
     parser.add_argument("--pure-drl", action="store_true",
                         help="Pure DRL mode: disable ALL reward shaping (no milestones, no LLM)")
+    parser.add_argument("--hybrid", action="store_true",
+                        help="🚀 Hybrid DRL+LLM mode: LLM sets objectives dynamically via tool calling")
     
     args = parser.parse_args()
     
@@ -488,7 +536,8 @@ if __name__ == "__main__":
             n_envs=args.n_envs,
             visualize=args.visualize,
             use_llm=args.use_llm,
-            pure_drl=args.pure_drl
+            pure_drl=args.pure_drl,
+            hybrid_mode=args.hybrid
         )
     else:
         test_model(

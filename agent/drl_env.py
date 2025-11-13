@@ -147,6 +147,11 @@ class PokemonEmeraldEnv(gym.Env):
         self.directional_multiplier = 1.0  # Based on distance to objectives
         self.directional_advice = ""  # Direction guidance
         
+        # 🆕 Hybrid DRL+LLM: Objectives manager integration
+        self.objectives_manager = None  # Set by callback if using hybrid mode
+        self.enable_dialogue_capture = False  # Enable via callback
+        self.captured_dialogues = set()  # Track dialogues to avoid duplicates
+        
         logger.info(f"Environment created - Action space: {self.action_space}, Observation space: {self.observation_space.shape}")
     
     def reset(
@@ -187,6 +192,7 @@ class PokemonEmeraldEnv(gym.Env):
         # 🆕 Limpiar caché de diálogos (pueden ser "stale" del estado guardado)
         self.last_dialog = ""
         self.last_dialog_step = 0
+        self.captured_dialogues.clear()  # Clear captured dialogues for new episode
         logger.debug("Dialog cache cleared on reset")
         
         logger.info(f"Initial position after reset: {self.prev_position}")
@@ -265,6 +271,17 @@ class PokemonEmeraldEnv(gym.Env):
         # Esto es muy ligero - solo lee memoria/screenshot si es necesario
         if self.current_step % 5 == 0:  # Chequear cada 5 steps para no sobrecargar
             self._cache_dialog_if_present()
+        
+        # 🆕 Hybrid DRL+LLM: Capture dialogues for LLM analysis
+        # This must come AFTER _cache_dialog_if_present() to get the latest dialogue
+        if self.enable_dialogue_capture and self.objectives_manager:
+            dialog = self._get_current_dialog()
+            if dialog and dialog not in self.captured_dialogues:
+                # New dialogue detected - record it
+                location = lightweight_state.get('location', 'Unknown')
+                self.objectives_manager.add_dialogue(dialog, location=location)
+                logger.info(f"📝 Captured dialogue at {location}: {dialog[:50]}...")
+                self.captured_dialogues.add(dialog)  # Track to avoid duplicates
         
         return observation, reward, terminated, truncated, info
     
@@ -547,6 +564,12 @@ class PokemonEmeraldEnv(gym.Env):
                 elif hp_ratio < 0.5:
                     reward -= 1.0
         
+        # 🆕 Hybrid DRL+LLM: Objective-based rewards
+        # Check if agent is making progress toward active objectives
+        if self.objectives_manager:
+            objective_reward = self._calculate_objective_rewards(prev_state, current_state)
+            reward += objective_reward
+        
         # Apply COMBINED reward multipliers:
         # 1. LLM multiplier (milestone-based, every 1000 steps)
         # 2. Directional multiplier (proximity-based, every 100 steps)
@@ -586,6 +609,96 @@ class PokemonEmeraldEnv(gym.Env):
             return True
         
         return False
+    
+    def _calculate_objective_rewards(
+        self,
+        prev_state: Dict[str, Any],
+        current_state: Dict[str, Any]
+    ) -> float:
+        """
+        🆕 Calculate rewards based on active objectives set by LLM.
+        
+        This is where the LLM's strategic planning influences the agent's learning.
+        Each objective type has different reward logic.
+        """
+        objective_reward = 0.0
+        
+        try:
+            active_objectives = self.objectives_manager.get_active_objectives()
+            
+            if not active_objectives:
+                return 0.0
+            
+            curr_pos = current_state.get('position', {})
+            curr_x, curr_y = curr_pos.get('x', 0), curr_pos.get('y', 0)
+            
+            for objective in active_objectives:
+                obj_type = objective.type
+                target = objective.target
+                weight = objective.reward_weight
+                
+                # === LOCATION OBJECTIVES ===
+                if obj_type == 'location':
+                    target_map = target.get('map', '')
+                    target_x = target.get('x')
+                    target_y = target.get('y')
+                    
+                    # Reward for being on the target map
+                    current_map = self._get_current_map_name()
+                    if current_map == target_map:
+                        objective_reward += 5.0 * weight
+                        
+                        # If specific coordinates specified, reward proximity
+                        if target_x is not None and target_y is not None:
+                            distance = abs(curr_x - target_x) + abs(curr_y - target_y)
+                            proximity_reward = max(0, (20 - distance) * 0.5)
+                            objective_reward += proximity_reward * weight
+                            
+                            # Big reward for reaching exact location
+                            if distance <= 2:
+                                objective_reward += 20.0 * weight
+                                # Mark objective as progressing
+                                self.objectives_manager.update_progress(objective.id, 0.8)
+                
+                # === DIALOGUE OBJECTIVES ===
+                elif obj_type == 'dialogue':
+                    # Reward for encountering new dialogues
+                    if self.last_dialog and (self.current_step - self.last_dialog_step < 10):
+                        # Recent dialogue detected
+                        objective_reward += 10.0 * weight
+                        
+                        # Check if dialogue matches target NPC
+                        target_npc = target.get('npc', '')
+                        if target_npc.lower() in self.last_dialog.lower():
+                            objective_reward += 30.0 * weight
+                            self.objectives_manager.update_progress(objective.id, 0.9)
+                
+                # === ITEM OBJECTIVES ===
+                elif obj_type == 'item':
+                    # Check if item count increased (would need item tracking)
+                    # For now, placeholder
+                    pass
+                
+                # === BATTLE OBJECTIVES ===
+                elif obj_type == 'battle':
+                    in_battle = current_state.get('in_battle', False)
+                    if in_battle:
+                        objective_reward += 5.0 * weight
+                
+                # === CUSTOM OBJECTIVES ===
+                elif obj_type == 'custom':
+                    # Custom objectives can have arbitrary conditions
+                    # For now, small encouragement reward
+                    objective_reward += 1.0 * weight
+            
+            # Log significant objective rewards
+            if objective_reward > 5.0:
+                logger.info(f"🎯 Objective reward: +{objective_reward:.1f} from {len(active_objectives)} objectives")
+        
+        except Exception as e:
+            logger.debug(f"Error calculating objective rewards: {e}")
+        
+        return objective_reward
     
     # === End lightweight methods ===
     
@@ -682,27 +795,44 @@ class PokemonEmeraldEnv(gym.Env):
             # Leer diálogo directo de memoria (rápido y simple)
             dialog = self.emulator.memory_reader.read_dialog()
             
-            # 🆕 Filtrar textos ambientales (NO son objetivos)
+            # 🆕 Filtrar textos ambientales (NO son útiles como objetivos)
+            # PERO mantener: nombres de ubicaciones, nombres de NPCs, diálogos importantes
             if dialog and dialog.strip():
                 dialog_lower = dialog.lower()
-                ambient_text_patterns = [
-                    "there is a movie on tv", "two men are dancing", "four boys are playing",
-                    "it's a nintendo", "game boy", "it's a poster", "it's a map",
-                    "it's a bookshelf", "there are books", "it's a clock",
-                    "it's a pc", "someone's pc", "it's a trash", "it's a plant",
-                    "the water is", "it's a beautiful", "nothing here",
-                    "took a closer look", "checked", "examined"
+                
+                # Textos que SÍ queremos capturar (locations, NPCs, story text)
+                important_patterns = [
+                    "town", "route", "city", "lab", "center", "mart", "house",  # Location names
+                    "professor", "prof.", "birch", "gym", "leader", "rival",  # NPCs
+                    "welcome", "help", "save", "pokemon", "poké", "mom", "dad",  # Story keywords
+                    "dangerous", "wild", "grass"  # Important warnings
                 ]
                 
-                if any(pattern in dialog_lower for pattern in ambient_text_patterns):
-                    logger.debug(f"🚫 Ignoring ambient text: '{dialog[:40]}...'")
-                    return  # No cachear texto ambiental
+                # Si contiene patrones importantes, SIEMPRE capturar
+                is_important = any(pattern in dialog_lower for pattern in important_patterns)
+                
+                # Textos triviales que NO queremos (solo si NO son importantes)
+                if not is_important:
+                    ambient_text_patterns = [
+                        "there is a movie on tv", "two men are dancing", "four boys are playing",
+                        "it's a nintendo", "game boy", "it's a poster", "it's a map",
+                        "it's a bookshelf", "there are books", "it's a clock",
+                        "it's a pc", "someone's pc", "it's a trash", "it's a plant",
+                        "the water is", "it's a beautiful", "nothing here",
+                        "took a closer look", "checked", "examined"
+                    ]
+                    
+                    if any(pattern in dialog_lower for pattern in ambient_text_patterns):
+                        logger.debug(f"🚫 Ignoring ambient text: '{dialog[:40]}...'")
+                        return  # No cachear texto ambiental
             
             # Solo guardar si hay texto nuevo y diferente al anterior
             if dialog and dialog.strip() and dialog != self.last_dialog:
                 self.last_dialog = dialog
                 self.last_dialog_step = self.current_step
-                logger.info(f"💬 [Step {self.current_step}] NEW DIALOG: '{dialog[:60]}...'")
+                # Mark if this is a location text
+                is_location = any(word in dialog.lower() for word in ["town", "route", "city"])
+                logger.info(f"{'📍' if is_location else '💬'} [Step {self.current_step}] NEW TEXT: '{dialog[:60]}...'")
         except Exception as e:
             # Log errores para saber si hay problemas
             logger.debug(f"Error caching dialog: {e}")
@@ -724,13 +854,26 @@ class PokemonEmeraldEnv(gym.Env):
             return ""
     
     def _set_directional_multiplier(self, multiplier: float, advice: str):
-        """Set directional reward multiplier based on proximity to objectives."""
+        """Set directional reward multiplier (from callback)."""
         self.directional_multiplier = multiplier
         self.directional_advice = advice
     
+    # 🆕 Hybrid DRL+LLM methods
+    def enable_hybrid_mode(self, objectives_manager):
+        """Enable hybrid mode with LLM-based objective setting."""
+        self.objectives_manager = objectives_manager
+        self.enable_dialogue_capture = True
+        logger.info("🤖 Hybrid DRL+LLM mode enabled - dialogues will be captured")
+    
+    def get_current_objectives(self):
+        """Get active objectives (for reward shaping)."""
+        if self.objectives_manager:
+            return self.objectives_manager.get_active_objectives()
+        return []
+    
     def close(self):
         """Clean up resources."""
-        self.emulator.stop()
+        self.emulator.close()
     
     def close(self):
         """Clean up resources."""

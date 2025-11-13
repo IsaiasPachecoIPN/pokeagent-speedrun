@@ -1,0 +1,36 @@
+{
+  "objectives": {
+    "exit_starting_room": {
+      "id": "exit_starting_room",
+      "name": "Exit Starting Room",
+      "description": "Leave the starting room and explore Littleroot Town",
+      "type": "location",
+      "target": {
+        "map": "LITTLEROOT_TOWN",
+        "condition": "different_from_start"
+      },
+      "reward_weight": 2.0,
+      "completed": false,
+      "progress": 0.0,
+      "created_at": "2025-11-13T10:44:45.723721",
+      "completed_at": null
+    },
+    "explore_route_101": {
+      "id": "explore_route_101",
+      "name": "Explore Route 101",
+      "description": "Travel to Route 101 and explore it thoroughly.",
+      "type": "location",
+      "target": {
+        "condition": "fully_explored",
+        "map": "ROUTE_101"
+      },
+      "reward_weight": 3,
+      "completed": false,
+      "progress": 0.0,
+      "created_at": "2025-11-13T10:52:18.300906",
+      "completed_at": null
+    }
+  },
+  "dialogue_history": [],
+  "last_updated": "2025-11-13T10:52:18.301390"
+}

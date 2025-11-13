@@ -1,0 +1,21 @@
+{
+  "objectives": {
+    "exit_starting_room": {
+      "id": "exit_starting_room",
+      "name": "Exit Starting Room",
+      "description": "Leave the starting room and explore Littleroot Town",
+      "type": "location",
+      "target": {
+        "map": "LITTLEROOT_TOWN",
+        "condition": "different_from_start"
+      },
+      "reward_weight": 2.0,
+      "completed": false,
+      "progress": 0.0,
+      "created_at": "2025-11-13T11:23:22.636158",
+      "completed_at": null
+    }
+  },
+  "dialogue_history": [],
+  "last_updated": "2025-11-13T11:23:22.636203"
+}

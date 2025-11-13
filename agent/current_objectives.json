@@ -1,0 +1,122 @@
+{
+  "objectives": {
+    "explore_starting_house": {
+      "id": "explore_starting_house",
+      "name": "Explore Starting House",
+      "description": "Look around the house and interact with objects (PC, TV, stairs)",
+      "type": "exploration",
+      "target": {
+        "keywords": [
+          "PC",
+          "TV",
+          "HOUSE",
+          "upstairs",
+          "MOM"
+        ],
+        "min_interactions": 3
+      },
+      "reward_weight": 1.5,
+      "completed": true,
+      "progress": 1.0,
+      "created_at": "2025-11-13T13:38:46.690420",
+      "completed_at": "2025-11-13T13:48:03.589591"
+    },
+    "meet_prof_birch": {
+      "id": "meet_prof_birch",
+      "name": "Meet Professor Birch",
+      "description": "Go next door to Prof. Birch's house or lab as Mom suggested",
+      "type": "location",
+      "target": {
+        "keywords": [
+          "PROF. BIRCH",
+          "BIRCH'S HOUSE",
+          "BIRCH'S LAB",
+          "POK\u00e9MON LAB"
+        ],
+        "any_match": true
+      },
+      "reward_weight": 2.0,
+      "completed": true,
+      "progress": 1.0,
+      "created_at": "2025-11-13T13:38:46.690437",
+      "completed_at": "2025-11-13T13:48:27.991894"
+    },
+    "interact_with_tv": {
+      "id": "interact_with_tv",
+      "name": "Interact with TV",
+      "description": "Watch the movie on the TV in the Starting House",
+      "type": "custom",
+      "target": {
+        "keywords": [
+          "TV",
+          "movie"
+        ]
+      },
+      "reward_weight": 1,
+      "completed": false,
+      "progress": 0.0,
+      "created_at": "2025-11-13T13:45:14.290084",
+      "completed_at": null
+    },
+    "interact_with_pc": {
+      "id": "interact_with_pc",
+      "name": "Interact with PC",
+      "description": "Use the PC in the Starting House to access the menu",
+      "type": "custom",
+      "target": {
+        "keywords": [
+          "PC",
+          "menu"
+        ]
+      },
+      "reward_weight": 1,
+      "completed": false,
+      "progress": 0.0,
+      "created_at": "2025-11-13T13:45:45.511409",
+      "completed_at": null
+    },
+    "go_upstairs": {
+      "id": "go_upstairs",
+      "name": "Go Upstairs",
+      "description": "Go upstairs to the second floor of the Starting House",
+      "type": "location",
+      "target": {
+        "keywords": [
+          "upstairs"
+        ]
+      },
+      "reward_weight": 1,
+      "completed": false,
+      "progress": 0.0,
+      "created_at": "2025-11-13T13:46:17.740283",
+      "completed_at": null
+    }
+  },
+  "dialogue_history": [
+    {
+      "text": "There is a movie on TV.",
+      "npc": null,
+      "location": "Starting House",
+      "timestamp": "2025-11-13T13:38:16.057179"
+    },
+    {
+      "text": "JOHNNY booted up the PC.",
+      "npc": null,
+      "location": "Starting House",
+      "timestamp": "2025-11-13T13:38:16.058321"
+    },
+    {
+      "text": "MOM: See you, honey!",
+      "npc": null,
+      "location": "Starting House",
+      "timestamp": "2025-11-13T13:38:16.059553"
+    },
+    {
+      "text": "PROF. BIRCH''S POK\u00e9MON LAB",
+      "npc": null,
+      "location": "Starting House",
+      "timestamp": "2025-11-13T13:38:16.061460"
+    }
+  ],
+  "last_updated": "2025-11-13T13:48:27.992049"
+}
