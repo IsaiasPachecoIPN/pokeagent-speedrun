@@ -67,6 +67,7 @@ class HybridLLMCallback(BaseCallback):
         
         # 🆕 LLM conversation tracking
         self.llm_call_count = 0
+        self._last_episode_count = 0  # Track episodes for reward comparison
         
         logger.info(f"🤖 Hybrid LLM Callback initialized with model: {llm_model}")
         logger.info(f"📋 Available tools: {[t['function']['name'] for t in self.tool_definitions]}")
@@ -194,6 +195,9 @@ Remember: The DRL agent learns low-level actions. You set HIGH-LEVEL objectives 
         
         # 🆕 Save LLM conversation to log file
         self._save_llm_log(messages, game_state_summary)
+        
+        # 🆕 Track episode count for next comparison
+        self._last_episode_count = len(self.episode_rewards)
         
         # Save updated objectives
         self.objectives_manager.save()
@@ -329,6 +333,58 @@ CURRENT OBJECTIVES:
         # Note: This might need adjustment based on how you track episodes
         pass
     
+    def _get_reward_statistics(self) -> Dict[str, Any]:
+        """
+        Get comprehensive reward statistics for logging.
+        
+        Returns:
+            Dictionary with reward statistics including recent trends
+        """
+        if not self.episode_rewards:
+            return {
+                "total_episodes": 0,
+                "avg_reward_last_10": 0.0,
+                "avg_reward_last_50": 0.0,
+                "avg_reward_all_time": 0.0,
+                "min_reward": 0.0,
+                "max_reward": 0.0,
+                "recent_rewards": [],
+                "reward_trend": "N/A"
+            }
+        
+        recent_10 = self.episode_rewards[-10:]
+        recent_50 = self.episode_rewards[-50:]
+        all_rewards = self.episode_rewards
+        
+        avg_10 = sum(recent_10) / len(recent_10) if recent_10 else 0.0
+        avg_50 = sum(recent_50) / len(recent_50) if recent_50 else 0.0
+        avg_all = sum(all_rewards) / len(all_rewards) if all_rewards else 0.0
+        
+        # Calculate reward trend (comparing last 10 vs previous 10)
+        if len(self.episode_rewards) >= 20:
+            prev_10 = self.episode_rewards[-20:-10]
+            avg_prev_10 = sum(prev_10) / len(prev_10)
+            if avg_10 > avg_prev_10 * 1.1:
+                trend = "📈 IMPROVING (+{:.1f}%)".format((avg_10 / avg_prev_10 - 1) * 100)
+            elif avg_10 < avg_prev_10 * 0.9:
+                trend = "📉 DECLINING ({:.1f}%)".format((avg_10 / avg_prev_10 - 1) * 100)
+            else:
+                trend = "➡️ STABLE"
+        else:
+            trend = "⏳ COLLECTING DATA"
+        
+        return {
+            "total_episodes": len(self.episode_rewards),
+            "avg_reward_last_10": round(avg_10, 3),
+            "avg_reward_last_50": round(avg_50, 3),
+            "avg_reward_all_time": round(avg_all, 3),
+            "min_reward": round(min(all_rewards), 3) if all_rewards else 0.0,
+            "max_reward": round(max(all_rewards), 3) if all_rewards else 0.0,
+            "recent_rewards": [round(r, 3) for r in recent_10],
+            "reward_trend": trend,
+            "episodes_since_last_check": len(self.episode_rewards) - getattr(self, '_last_episode_count', 0)
+        }
+    
     def _save_llm_log(self, messages: List[Dict[str, Any]], game_state_summary: str):
         """
         Save LLM conversation to a log file.
@@ -341,43 +397,70 @@ CURRENT OBJECTIVES:
         
         self.llm_call_count += 1
         
+        # Helper function to convert tool_calls to serializable format
+        def serialize_tool_call(tool_call):
+            """Convert ToolCall object to dict"""
+            if isinstance(tool_call, dict):
+                return tool_call
+            # Handle ToolCall object
+            return {
+                'function': {
+                    'name': tool_call.function.name if hasattr(tool_call.function, 'name') else str(tool_call.function.get('name', '')),
+                    'arguments': tool_call.function.arguments if hasattr(tool_call.function, 'arguments') else tool_call.function.get('arguments', {})
+                }
+            }
+        
         # Extract tool calls summary for quick reference
         tool_calls_summary = []
         for msg in messages:
-            if msg.get('role') == 'assistant' and msg.get('tool_calls'):
-                for tool_call in msg['tool_calls']:
-                    tool_calls_summary.append({
-                        'tool': tool_call['function']['name'],
-                        'arguments': tool_call['function'].get('arguments', {})
-                    })
+            msg_dict = msg if isinstance(msg, dict) else {'role': getattr(msg, 'role', None), 'content': getattr(msg, 'content', None)}
+            if msg_dict.get('role') == 'assistant':
+                tool_calls = msg.get('tool_calls') if isinstance(msg, dict) else getattr(msg, 'tool_calls', None)
+                if tool_calls:
+                    for tool_call in tool_calls:
+                        tc_dict = serialize_tool_call(tool_call)
+                        tool_calls_summary.append({
+                            'tool': tc_dict['function']['name'],
+                            'arguments': tc_dict['function'].get('arguments', {})
+                        })
         
         # Get final response (last assistant message with content)
         final_response = None
         for msg in reversed(messages):
-            if msg.get('role') == 'assistant' and msg.get('content'):
-                final_response = msg.get('content')
-                break
+            if isinstance(msg, dict):
+                if msg.get('role') == 'assistant' and msg.get('content'):
+                    final_response = msg.get('content')
+                    break
+            else:
+                if getattr(msg, 'role', None) == 'assistant' and getattr(msg, 'content', None):
+                    final_response = getattr(msg, 'content')
+                    break
         
         # Convert messages to JSON-serializable format
-        # Ollama Message objects need to be converted to dicts
+        # Ollama Message objects and ToolCall objects need to be converted to dicts
         serializable_messages = []
         for msg in messages:
             if isinstance(msg, dict):
-                serializable_messages.append(msg)
+                # Already a dict, but check if tool_calls need serialization
+                msg_copy = msg.copy()
+                if msg_copy.get('tool_calls'):
+                    msg_copy['tool_calls'] = [serialize_tool_call(tc) for tc in msg_copy['tool_calls']]
+                serializable_messages.append(msg_copy)
             else:
                 # Convert Ollama Message object to dict
                 msg_dict = {
-                    'role': msg.get('role') if hasattr(msg, 'get') else getattr(msg, 'role', None),
-                    'content': msg.get('content') if hasattr(msg, 'get') else getattr(msg, 'content', None)
+                    'role': getattr(msg, 'role', None),
+                    'content': getattr(msg, 'content', None)
                 }
-                # Add tool_calls if present
-                if hasattr(msg, 'get'):
-                    if msg.get('tool_calls'):
-                        msg_dict['tool_calls'] = msg.get('tool_calls')
-                elif hasattr(msg, 'tool_calls'):
-                    msg_dict['tool_calls'] = getattr(msg, 'tool_calls', None)
+                # Add tool_calls if present (and serialize them)
+                tool_calls = getattr(msg, 'tool_calls', None)
+                if tool_calls:
+                    msg_dict['tool_calls'] = [serialize_tool_call(tc) for tc in tool_calls]
                 
                 serializable_messages.append(msg_dict)
+        
+        # 🆕 Calculate reward statistics
+        reward_stats = self._get_reward_statistics()
         
         # Create log entry
         log_entry = {
@@ -386,6 +469,7 @@ CURRENT OBJECTIVES:
             "training_step": self.num_timesteps,
             "model": self.llm_model,
             "game_state_summary": game_state_summary,
+            "reward_statistics": reward_stats,  # 🆕 Reward tracking
             "tool_calls_summary": tool_calls_summary,  # 🆕 Quick reference
             "final_response": final_response,  # 🆕 LLM's final analysis
             "full_conversation": serializable_messages,  # Complete conversation for debugging (JSON serializable)
@@ -404,10 +488,19 @@ CURRENT OBJECTIVES:
                 json.dump(log_entry, f, indent=2, ensure_ascii=False)
             logger.info(f"💾 LLM conversation saved to: {filepath}")
             logger.info(f"   Tools used: {[t['tool'] for t in tool_calls_summary]}")
+            
+            # 🆕 Log reward statistics
+            reward_stats = log_entry.get('reward_statistics', {})
+            if reward_stats.get('total_episodes', 0) > 0:
+                logger.info(f"   📊 Rewards - Avg (last 10): {reward_stats['avg_reward_last_10']:.3f}, Trend: {reward_stats['reward_trend']}")
+                logger.info(f"   📈 Episodes: {reward_stats['total_episodes']} total, {reward_stats['episodes_since_last_check']} since last check")
+            
             if final_response:
-                logger.info(f"   Response: {final_response[:100]}...")
+                logger.info(f"   💬 Response: {final_response[:100]}...")
         except Exception as e:
             logger.error(f"❌ Failed to save LLM log: {e}")
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
 
 
 # Standalone function to test the LLM with tools

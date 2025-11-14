@@ -23,48 +23,63 @@ def view_latest_log(log_dir="logs/llm_responses"):
     print("=" * 70)
     print()
     
-    with open(latest_log, ''r'', encoding=''utf-8'') as f:
+    with open(latest_log, 'r', encoding='utf-8') as f:
         log_data = json.load(f)
     
-    print(f" Call Number: {log_data[''call_number'']}")
-    print(f" Timestamp: {log_data[''timestamp'']}")
-    print(f" Training Step: {log_data[''training_step'']}")
-    print(f" Model: {log_data[''model'']}")
+    print(f"📋 Call Number: {log_data['call_number']}")
+    print(f"⏰ Timestamp: {log_data['timestamp']}")
+    print(f"🎮 Training Step: {log_data['training_step']}")
+    print(f"🤖 Model: {log_data['model']}")
     print()
     
-    print(" Game State:")
-    print("-" * 70)
-    print(log_data[''game_state_summary''])
-    print()
-    
-    if log_data.get(''tool_calls_summary''):
-        print("  Tools Used:")
+    # 🆕 Show reward statistics
+    if log_data.get('reward_statistics'):
+        print("📊 Reward Statistics:")
         print("-" * 70)
-        for i, tool in enumerate(log_data[''tool_calls_summary''], 1):
-            print(f"{i}. {tool[''tool'']}")
-            if tool.get(''arguments''):
-                args_str = json.dumps(tool[''arguments''], indent=2)
+        reward_stats = log_data['reward_statistics']
+        print(f"   Total Episodes: {reward_stats.get('total_episodes', 0)}")
+        print(f"   Avg Reward (Last 10): {reward_stats.get('avg_reward_last_10', 0):.3f}")
+        print(f"   Avg Reward (Last 50): {reward_stats.get('avg_reward_last_50', 0):.3f}")
+        print(f"   Avg Reward (All Time): {reward_stats.get('avg_reward_all_time', 0):.3f}")
+        print(f"   Trend: {reward_stats.get('reward_trend', 'N/A')}")
+        recent = reward_stats.get('recent_rewards', [])
+        if recent:
+            print(f"   Recent (last 10): {', '.join([f'{r:.2f}' for r in recent[-5:]])}...")
+        print()
+    
+    print("🎲 Game State:")
+    print("-" * 70)
+    print(log_data['game_state_summary'])
+    print()
+    
+    if log_data.get('tool_calls_summary'):
+        print("🛠️  Tools Used:")
+        print("-" * 70)
+        for i, tool in enumerate(log_data['tool_calls_summary'], 1):
+            print(f"{i}. {tool['tool']}")
+            if tool.get('arguments'):
+                args_str = json.dumps(tool['arguments'], indent=2)
                 print(f"   Arguments: {args_str}")
         print()
     
-    if log_data.get(''final_response''):
-        print(" LLM Final Response:")
+    if log_data.get('final_response'):
+        print("💬 LLM Final Response:")
         print("-" * 70)
-        print(log_data[''final_response''])
+        print(log_data['final_response'])
         print()
     
-    print(" Objectives After:")
+    print("🎯 Objectives After:")
     print("-" * 70)
-    objectives = log_data[''objectives_after'']
+    objectives = log_data['objectives_after']
     if isinstance(objectives, str):
         objectives = json.loads(objectives)
     
-    if objectives.get(''objectives''):
-        for obj_id, obj in objectives[''objectives''].items():
-            status = "" if obj[''completed''] else ""
-            print(f"{status} {obj[''name'']}")
-            print(f"   Progress: {obj[''progress''] * 100:.0f}%")
-            print(f"   Weight: {obj[''reward_weight'']}")
+    if objectives.get('objectives'):
+        for obj_id, obj in objectives['objectives'].items():
+            status = "✅" if obj['completed'] else "📌"
+            print(f"{status} {obj['name']}")
+            print(f"   Progress: {obj['progress'] * 100:.0f}%")
+            print(f"   Weight: {obj['reward_weight']}")
             print()
     
     print("=" * 70)
@@ -86,17 +101,25 @@ def list_all_logs(log_dir="logs/llm_responses"):
     
     for log_file in log_files:
         try:
-            with open(log_file, ''r'', encoding=''utf-8'') as f:
+            with open(log_file, 'r', encoding='utf-8') as f:
                 log_data = json.load(f)
             
-            tools_used = len(log_data.get(''tool_calls_summary'', []))
-            timestamp = datetime.fromisoformat(log_data[''timestamp''])
+            tools_used = len(log_data.get('tool_calls_summary', []))
+            timestamp = datetime.fromisoformat(log_data['timestamp'])
             
-            print(f" {log_file.name}")
-            print(f"   Step: {log_data[''training_step'']:,} | Tools: {tools_used} | Time: {timestamp.strftime(''%Y-%m-%d %H:%M:%S'')}")
+            # 🆕 Get reward info
+            reward_info = ""
+            if log_data.get('reward_statistics'):
+                reward_stats = log_data['reward_statistics']
+                avg_10 = reward_stats.get('avg_reward_last_10', 0)
+                trend = reward_stats.get('reward_trend', 'N/A')
+                reward_info = f" | Reward: {avg_10:.2f} {trend}"
             
-            if log_data.get(''final_response''):
-                response_preview = log_data[''final_response''][:80]
+            print(f"📋 {log_file.name}")
+            print(f"   Step: {log_data['training_step']:,} | Tools: {tools_used} | Time: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}{reward_info}")
+            
+            if log_data.get('final_response'):
+                response_preview = log_data['final_response'][:80]
                 print(f"   Response: {response_preview}...")
             print()
         
