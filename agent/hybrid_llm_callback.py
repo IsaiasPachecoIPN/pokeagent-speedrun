@@ -115,15 +115,33 @@ Analyze the current training progress and take appropriate actions:
 
 {game_state_summary}
 
-Your tasks:
-1. Read the current objectives to see what the agent is working on
-2. Read recent dialogues to understand story progression
-3. Evaluate if current objectives are appropriate
-4. If dialogues suggest new objectives, create them
-5. If the agent is struggling, adjust policy parameters
-6. If objectives are completed, mark them as complete
+🎯 YOUR TASKS (follow this order):
 
-Remember: The DRL agent learns the low-level actions. Your job is to set the RIGHT objectives and tune the rewards.
+1️⃣ READ OBJECTIVES:
+   - Call read_objectives() to see active objectives and their dialogue_history
+
+2️⃣ EVALUATE EACH ACTIVE OBJECTIVE:
+   - For each objective, look at its dialogue_history field (NOT global dialogues)
+   - Call evaluate_objective_completion(objective_id, "your reasoning") to analyze
+   - If completion criteria met: call complete_objective(objective_id)
+   - If not met: leave it active to gather more dialogues
+
+3️⃣ CREATE NEW OBJECTIVE (if needed):
+   - If NO active objectives OR last objective just completed:
+     a. Call read_dialogues() to see recent story context
+     b. Create ONE new objective with write_objective() based on what should happen next
+     c. The new objective will start with EMPTY dialogue_history and track future dialogues
+
+4️⃣ ADJUST POLICY (optional):
+   - If agent is stuck, call update_policy() to adjust learning
+
+🔑 KEY POINTS:
+- Each objective has ITS OWN dialogue_history (isolated context)
+- New objectives start with NO previous dialogues
+- Only evaluate completion based on THAT objective's dialogue_history
+- Create objectives ONE AT A TIME for focused learning
+
+Remember: The DRL agent learns low-level actions. You set HIGH-LEVEL objectives based on story progression.
 """
         
         # Initialize conversation
@@ -201,6 +219,8 @@ Remember: The DRL agent learns the low-level actions. Your job is to set the RIG
         try:
             if function_name == 'read_objectives':
                 result = self.llm_tools.read_objectives()
+            elif function_name == 'evaluate_objective_completion':
+                result = self.llm_tools.evaluate_objective_completion(**arguments)
             elif function_name == 'write_objective':
                 result = self.llm_tools.write_objective(**arguments)
             elif function_name == 'complete_objective':
@@ -243,26 +263,45 @@ Your role:
 - The DRL (Deep Reinforcement Learning) agent handles LOW-LEVEL actions (button presses, movement)
 - YOU handle HIGH-LEVEL strategy (objectives, goals, reward tuning)
 
-You have access to these tools:
-1. read_objectives() - See what objectives the agent is working on
-2. write_objective() - Create new objectives based on game progress
-3. complete_objective() - Mark objectives as done
-4. read_dialogues() - Read in-game dialogues to understand story
-5. update_policy() - Adjust reward weights to guide learning
+🆕 OBJECTIVE SYSTEM WITH PER-OBJECTIVE DIALOGUE TRACKING:
+- Each objective has its OWN dialogue_history that tracks dialogues while it's active
+- When you create a new objective, it starts with an EMPTY dialogue history
+- Only dialogues encountered AFTER objective creation are tracked in that objective
+- This gives you FOCUSED CONTEXT for each objective without past dialogues interfering
 
-Your workflow:
-1. ALWAYS start by reading objectives and dialogues
-2. Analyze if current objectives are appropriate
-3. Based on dialogues, infer what should happen next in the game
-4. Create new objectives that guide the agent toward game progression
-5. If agent is stuck, adjust policy parameters (e.g., increase exploration)
+You have access to these tools:
+1. read_objectives() - See active objectives with THEIR dialogue_history (not global history)
+2. evaluate_objective_completion(objective_id, reasoning) - Analyze if objective is complete based on ITS dialogue_history
+3. complete_objective(objective_id) - Mark objective as complete (use AFTER evaluating)
+4. write_objective() - Create new objective (starts with empty dialogue_history)
+5. read_dialogues(count) - Read GLOBAL dialogue history (for general context)
+6. update_policy() - Adjust reward weights to guide learning
+
+🎯 RECOMMENDED WORKFLOW:
+1. Call read_objectives() to see active objectives and their dialogue_history
+2. For each active objective:
+   a. Analyze its dialogue_history field (not global dialogues)
+   b. Call evaluate_objective_completion(objective_id, "reasoning") to check if complete
+   c. If complete: call complete_objective(objective_id)
+   d. If not complete: leave it active to gather more dialogues
+3. If no active objectives OR last objective completed:
+   a. Call read_dialogues() to see recent game context
+   b. Create a NEW objective with write_objective() based on story progression
+   c. The new objective will start tracking dialogues from this point forward
+
+📋 OBJECTIVE DESIGN TIPS:
+- Make objectives DIALOGUE-BASED: target should check for specific keywords/NPCs
+- Example: {"keywords": ["PROF. BIRCH", "WELCOME"], "any_match": true}
+- Each objective should have CLEAR completion criteria visible in dialogue
+- Create ONE objective at a time for focused learning
+- New objectives inherit NO dialogue history from previous ones
 
 Example objective types:
-- location: {"map": "ROUTE_101", "x": 10, "y": 5}
-- dialogue: {"npc": "PROF_BIRCH", "trigger": "talk"}
+- dialogue: {"keywords": ["PROF_BIRCH", "WELCOME"], "any_match": true}
+- location: {"keywords": ["ROUTE_101", "OLDALE"], "any_match": true}
 - custom: {"condition": "any descriptive condition"}
 
-Be strategic and incremental. Don't create too many objectives at once.
+Be strategic and incremental. Create objectives one at a time based on story flow.
 """
     
     def _get_game_state_summary(self) -> str:
@@ -319,6 +358,27 @@ CURRENT OBJECTIVES:
                 final_response = msg.get('content')
                 break
         
+        # Convert messages to JSON-serializable format
+        # Ollama Message objects need to be converted to dicts
+        serializable_messages = []
+        for msg in messages:
+            if isinstance(msg, dict):
+                serializable_messages.append(msg)
+            else:
+                # Convert Ollama Message object to dict
+                msg_dict = {
+                    'role': msg.get('role') if hasattr(msg, 'get') else getattr(msg, 'role', None),
+                    'content': msg.get('content') if hasattr(msg, 'get') else getattr(msg, 'content', None)
+                }
+                # Add tool_calls if present
+                if hasattr(msg, 'get'):
+                    if msg.get('tool_calls'):
+                        msg_dict['tool_calls'] = msg.get('tool_calls')
+                elif hasattr(msg, 'tool_calls'):
+                    msg_dict['tool_calls'] = getattr(msg, 'tool_calls', None)
+                
+                serializable_messages.append(msg_dict)
+        
         # Create log entry
         log_entry = {
             "call_number": self.llm_call_count,
@@ -328,7 +388,7 @@ CURRENT OBJECTIVES:
             "game_state_summary": game_state_summary,
             "tool_calls_summary": tool_calls_summary,  # 🆕 Quick reference
             "final_response": final_response,  # 🆕 LLM's final analysis
-            "full_conversation": messages,  # Complete conversation for debugging
+            "full_conversation": serializable_messages,  # Complete conversation for debugging (JSON serializable)
             "objectives_before": json.loads(self.objectives_manager.to_json_str()) if hasattr(self, '_objectives_before') else None,
             "objectives_after": json.loads(self.objectives_manager.to_json_str())
         }

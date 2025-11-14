@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class Objective:
-    """Represents a single game objective."""
+    """Represents a single game objective with its own dialogue history."""
     
     def __init__(
         self,
@@ -28,7 +28,8 @@ class Objective:
         completed: bool = False,
         progress: float = 0.0,
         created_at: Optional[str] = None,
-        completed_at: Optional[str] = None
+        completed_at: Optional[str] = None,
+        dialogue_history: Optional[List[Dict[str, Any]]] = None  # 🆕 Per-objective dialogue history
     ):
         self.id = id
         self.name = name
@@ -40,6 +41,7 @@ class Objective:
         self.progress = progress
         self.created_at = created_at or datetime.now().isoformat()
         self.completed_at = completed_at
+        self.dialogue_history = dialogue_history or []  # 🆕 Each objective tracks its own dialogues
         
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -53,7 +55,8 @@ class Objective:
             'completed': self.completed,
             'progress': self.progress,
             'created_at': self.created_at,
-            'completed_at': self.completed_at
+            'completed_at': self.completed_at,
+            'dialogue_history': self.dialogue_history  # 🆕 Include in serialization
         }
     
     @classmethod
@@ -193,12 +196,21 @@ class ObjectivesManager:
             'location': location,
             'timestamp': datetime.now().isoformat()
         }
+        
+        # 🆕 Add dialogue to GLOBAL history (for context across objectives)
         self.dialogue_history.append(dialogue_entry)
+        
+        # 🆕 Add dialogue to ACTIVE objectives' history (for per-objective context)
+        for obj in self.get_active_objectives():
+            obj.dialogue_history.append(dialogue_entry)
+            # Keep only last 20 dialogues per objective to avoid bloat
+            if len(obj.dialogue_history) > 20:
+                obj.dialogue_history = obj.dialogue_history[-20:]
         
         # 🆕 Auto-check objectives based on new dialogue
         self._check_dialogue_objectives(text)
         
-        # Keep only last 50 dialogues to avoid file bloat
+        # Keep only last 50 dialogues in global history to avoid file bloat
         if len(self.dialogue_history) > 50:
             self.dialogue_history = self.dialogue_history[-50:]
         self.save()

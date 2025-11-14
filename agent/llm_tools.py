@@ -38,14 +38,56 @@ class LLMTools:
         Read the current objectives and their status.
         
         Returns a JSON object containing:
-        - active_objectives: List of incomplete objectives
+        - active_objectives: List of incomplete objectives (with their dialogue history)
         - completed_objectives: List of completed objectives
-        - recent_dialogues: Recent in-game dialogues
+        - recent_dialogues: Recent in-game dialogues (global)
         """
         return {
             'active_objectives': [obj.to_dict() for obj in self.objectives_manager.get_active_objectives()],
             'completed_objectives': [obj.to_dict() for obj in self.objectives_manager.get_completed_objectives()],
             'recent_dialogues': self.objectives_manager.get_recent_dialogues(10)
+        }
+    
+    # ===== TOOL: Evaluate Objective Completion =====
+    def evaluate_objective_completion(self, objective_id: str, reasoning: str = "") -> dict:
+        """
+        Evaluate whether an objective should be marked as completed based on its dialogue history.
+        The LLM should use this tool after analyzing the objective's dialogue_history to determine completion.
+        
+        Args:
+            objective_id: The ID of the objective to evaluate
+            reasoning: LLM's reasoning for why the objective is/isn't complete
+        
+        Returns:
+            Success status and current objective state
+        """
+        objectives = self.objectives_manager.objectives
+        
+        if objective_id not in objectives:
+            return {
+                'success': False,
+                'message': f"Objective {objective_id} not found"
+            }
+        
+        obj = objectives[objective_id]
+        
+        if obj.completed:
+            return {
+                'success': True,
+                'already_completed': True,
+                'message': f"Objective {objective_id} was already completed",
+                'dialogue_history': obj.dialogue_history
+            }
+        
+        # Return current state for LLM to decide
+        return {
+            'success': True,
+            'objective_id': objective_id,
+            'objective_name': obj.name,
+            'dialogue_history': obj.dialogue_history,
+            'dialogue_count': len(obj.dialogue_history),
+            'reasoning': reasoning,
+            'message': f"Objective '{obj.name}' has {len(obj.dialogue_history)} dialogues. Use complete_objective() if criteria are met."
         }
     
     # ===== TOOL: Write Objective =====
@@ -258,8 +300,29 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
         {
             'type': 'function',
             'function': {
+                'name': 'evaluate_objective_completion',
+                'description': 'Evaluate if an objective is completed by analyzing its dialogue_history. Use this BEFORE complete_objective to check if completion criteria are met.',
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'objective_id': {
+                            'type': 'string',
+                            'description': 'The ID of the objective to evaluate'
+                        },
+                        'reasoning': {
+                            'type': 'string',
+                            'description': 'Your reasoning for why this objective is/is not complete based on dialogue'
+                        }
+                    },
+                    'required': ['objective_id']
+                }
+            }
+        },
+        {
+            'type': 'function',
+            'function': {
                 'name': 'complete_objective',
-                'description': 'Mark an objective as completed when the agent has achieved it.',
+                'description': 'Mark an objective as completed. Use evaluate_objective_completion first to confirm completion criteria are met.',
                 'parameters': {
                     'type': 'object',
                     'properties': {
