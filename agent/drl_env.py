@@ -11,6 +11,7 @@ from typing import Optional, Tuple, Dict, Any
 
 from pokemon_env.emulator import EmeraldEmulator
 from agent.lightweight_state_reader import LightweightStateReader
+from agent.spatial_analyzer import SpatialAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +153,10 @@ class PokemonEmeraldEnv(gym.Env):
         self.enable_dialogue_capture = False  # Enable via callback
         self.captured_dialogues = set()  # Track dialogues to avoid duplicates
         
+        # 🆕 Spatial Awareness System
+        self.spatial_analyzer = SpatialAnalyzer()  # Initialized without CNN (will be set later)
+        self.last_spatial_info = None  # Cache last spatial analysis
+        
         logger.info(f"Environment created - Action space: {self.action_space}, Observation space: {self.observation_space.shape}")
     
     def reset(
@@ -245,6 +250,13 @@ class PokemonEmeraldEnv(gym.Env):
         # For reward calculation, we still need some game state info
         # But we can get it from the lightweight reader
         lightweight_state = self.state_reader.get_drl_state(map_radius=3)
+        
+        # 🆕 Spatial awareness: Analyze surroundings from map observation
+        # This gives us proximity info for doors, NPCs, obstacles, etc.
+        if observation is not None and 'map' in observation:
+            self.last_spatial_info = self.spatial_analyzer.analyze_surroundings(observation['map'])
+        else:
+            self.last_spatial_info = None
         
         # Calculate reward using lightweight state
         reward = self._calculate_reward_from_lightweight(self.prev_game_state, lightweight_state)
@@ -664,6 +676,29 @@ class PokemonEmeraldEnv(gym.Env):
                                 objective_reward += 20.0 * weight
                                 # Mark objective as progressing
                                 self.objectives_manager.update_progress(objective.id, 0.8)
+                        
+                        # 🆕 SPATIAL BONUS: Use spatial awareness for proximity rewards
+                        if self.last_spatial_info:
+                            # Apply spatial proximity multiplier
+                            spatial_multiplier = self.spatial_analyzer.calculate_proximity_reward(
+                                self.last_spatial_info,
+                                obj_type,
+                                target,
+                                base_reward=1.0
+                            )
+                            if spatial_multiplier > 1.0:
+                                objective_reward *= spatial_multiplier
+                            
+                            # Check for spatial mission completion
+                            is_complete, reason = self.spatial_analyzer.detect_mission_completion(
+                                self.last_spatial_info,
+                                objective.__dict__,  # Convert to dict
+                                current_state
+                            )
+                            if is_complete:
+                                logger.info(f"🎯 Spatial completion detected: {reason}")
+                                objective_reward += 50.0 * weight  # Big bonus for completion
+                                self.objectives_manager.update_progress(objective.id, 1.0)
                 
                 # === DIALOGUE OBJECTIVES ===
                 elif obj_type == 'dialogue':
@@ -677,6 +712,14 @@ class PokemonEmeraldEnv(gym.Env):
                         if target_npc.lower() in self.last_dialog.lower():
                             objective_reward += 30.0 * weight
                             self.objectives_manager.update_progress(objective.id, 0.9)
+                    
+                    # 🆕 SPATIAL BONUS: Reward approaching NPCs
+                    if self.last_spatial_info and self.last_spatial_info.get('nearby_npcs'):
+                        closest_npc_distance = self.last_spatial_info['nearby_npcs'][0][1]
+                        if closest_npc_distance < 2.0:
+                            proximity_bonus = (2.0 - closest_npc_distance) * 5.0
+                            objective_reward += proximity_bonus * weight
+                            logger.debug(f"📍 NPC proximity bonus: +{proximity_bonus:.1f} (distance: {closest_npc_distance:.1f})")
                 
                 # === ITEM OBJECTIVES ===
                 elif obj_type == 'item':

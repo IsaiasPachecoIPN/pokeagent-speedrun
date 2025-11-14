@@ -315,13 +315,31 @@ Be strategic and incremental. Create objectives one at a time based on story flo
         avg_reward = sum(self.episode_rewards[-10:]) / len(self.episode_rewards[-10:]) if self.episode_rewards else 0
         avg_length = sum(self.episode_lengths[-10:]) / len(self.episode_lengths[-10:]) if self.episode_lengths else 0
         
+        # Build base summary
         summary = f"""
 TRAINING STATISTICS:
 - Total steps: {self.num_timesteps}
 - Episodes completed: {len(self.episode_rewards)}
 - Average reward (last 10 episodes): {avg_reward:.2f}
 - Average episode length: {avg_length:.0f}
-
+"""
+        
+        # 🆕 Add spatial context if available
+        env = self.training_env.envs[0] if hasattr(self.training_env, 'envs') else self.training_env
+        if hasattr(env, 'last_spatial_info') and env.last_spatial_info:
+            try:
+                # Get current game state
+                game_state = env.prev_game_state or {}
+                spatial_context = env.spatial_analyzer.get_spatial_context_for_llm(
+                    env.last_spatial_info,
+                    game_state
+                )
+                summary += f"\nSPATIAL CONTEXT:\n{spatial_context}\n"
+            except Exception as e:
+                logger.debug(f"Could not get spatial context: {e}")
+        
+        # Add objectives
+        summary += f"""
 CURRENT OBJECTIVES:
 {self.objectives_manager.to_json_str()}
 """
