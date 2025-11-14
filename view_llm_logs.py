@@ -52,6 +52,29 @@ def view_latest_log(log_dir="logs/llm_responses"):
     print(log_data['game_state_summary'])
     print()
     
+    # 🆕 Show map observation
+    if log_data.get('map_observation'):
+        map_obs = log_data['map_observation']
+        if 'error' not in map_obs:
+            print("🗺️  Map Observation:")
+            print("-" * 70)
+            
+            # Show ASCII visualization
+            if map_obs.get('ascii_visualization'):
+                print(map_obs['ascii_visualization'])
+            
+            # Show spatial analysis summary
+            spatial = map_obs.get('spatial_analysis', {})
+            if spatial:
+                print("\n📍 Spatial Summary:")
+                if spatial.get('nearby_doors'):
+                    print(f"   🚪 Doors: {spatial['nearby_doors']}")
+                if spatial.get('nearby_npcs'):
+                    print(f"   👤 NPCs: {spatial['nearby_npcs']}")
+                if spatial.get('passable_directions'):
+                    print(f"   ✅ Can move: {', '.join(spatial['passable_directions'])}")
+            print()
+    
     if log_data.get('tool_calls_summary'):
         print("🛠️  Tools Used:")
         print("-" * 70)

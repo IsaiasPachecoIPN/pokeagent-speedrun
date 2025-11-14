@@ -11,6 +11,8 @@ This callback integrates LLM-based strategic planning with DRL training:
 import logging
 import json
 import ollama
+import numpy as np
+from datetime import datetime
 from typing import List, Dict, Any, Optional
 from stable_baselines3.common.callbacks import BaseCallback
 
@@ -403,6 +405,135 @@ CURRENT OBJECTIVES:
             "episodes_since_last_check": len(self.episode_rewards) - getattr(self, '_last_episode_count', 0)
         }
     
+    def _capture_map_observation(self) -> Dict[str, Any]:
+        """
+        Capture the current CNN map observation and spatial analysis.
+        
+        Returns:
+            Dictionary with map data, spatial info, and visualization
+        """
+        try:
+            # Get environment
+            env = self.training_env.envs[0] if hasattr(self.training_env, 'envs') else self.training_env
+            
+            # Get map observation from state reader
+            if not hasattr(env, 'state_reader'):
+                return {"error": "No state_reader available"}
+            
+            observation = env.state_reader.get_observation_for_drl(map_radius=3)
+            if observation is None or 'map' not in observation:
+                return {"error": "No map observation available"}
+            
+            map_array = observation['map']  # Shape: (7, 7, 3)
+            
+            # Convert numpy array to lists for JSON serialization
+            map_data = {
+                "shape": list(map_array.shape),
+                "channels": {
+                    "metatile_id": map_array[:, :, 0].tolist(),  # Channel 0: visual appearance
+                    "collision": map_array[:, :, 1].tolist(),     # Channel 1: collision data
+                    "behavior": map_array[:, :, 2].tolist()       # Channel 2: behavior (doors, NPCs, etc)
+                },
+                "center_position": [3, 3],  # Player is always at center
+                "description": "7x7 grid centered on player - [y][x] indexed"
+            }
+            
+            # Add spatial analysis if available
+            spatial_data = {}
+            if hasattr(env, 'last_spatial_info') and env.last_spatial_info:
+                spatial_info = env.last_spatial_info
+                spatial_data = {
+                    "nearby_doors": spatial_info.get('nearby_doors', []),
+                    "nearby_npcs": spatial_info.get('nearby_npcs', []),
+                    "nearby_exits": spatial_info.get('nearby_exits', []),
+                    "closest_door": spatial_info.get('closest_door'),
+                    "obstacles": spatial_info.get('obstacles', {}),
+                    "passable_directions": spatial_info.get('passable_directions', []),
+                    "in_grass": spatial_info.get('in_grass', False),
+                    "near_water": spatial_info.get('near_water', False),
+                    "num_obstacles": spatial_info.get('num_obstacles', 0),
+                    "num_passable": spatial_info.get('num_passable', 0)
+                }
+            
+            # Create ASCII visualization of the map
+            ascii_map = self._create_ascii_map(map_array, spatial_data)
+            
+            return {
+                "map_array": map_data,
+                "spatial_analysis": spatial_data,
+                "ascii_visualization": ascii_map,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.warning(f"Could not capture map observation: {e}")
+            return {"error": str(e)}
+    
+    def _create_ascii_map(self, map_array: np.ndarray, spatial_data: Dict[str, Any]) -> str:
+        """
+        Create an ASCII visualization of the map for easy viewing in logs.
+        
+        Args:
+            map_array: 7x7x3 numpy array
+            spatial_data: Spatial analysis data
+            
+        Returns:
+            ASCII string representation
+        """
+        from agent.spatial_analyzer import BEHAVIOR_DOOR, BEHAVIOR_NPC, BEHAVIOR_EXIT, BEHAVIOR_GRASS, COLLISION_WALL, COLLISION_WATER
+        
+        lines = []
+        lines.append("\n7x7 Map Observation (Player at center 'P'):")
+        lines.append("=" * 43)
+        
+        for y in range(7):
+            row = ""
+            for x in range(7):
+                # Player position
+                if y == 3 and x == 3:
+                    row += " P "
+                    continue
+                
+                # Check behavior channel first (more interesting)
+                behavior = map_array[y, x, 2]
+                collision = map_array[y, x, 1]
+                
+                if behavior == BEHAVIOR_DOOR:
+                    row += " D "  # Door
+                elif behavior == BEHAVIOR_NPC:
+                    row += " N "  # NPC
+                elif behavior == BEHAVIOR_EXIT:
+                    row += " E "  # Exit
+                elif behavior == BEHAVIOR_GRASS:
+                    row += " G "  # Grass
+                elif collision == COLLISION_WALL:
+                    row += " # "  # Wall
+                elif collision == COLLISION_WATER:
+                    row += " ~ "  # Water
+                else:
+                    row += " . "  # Empty/passable
+            
+            lines.append(f"|{row}|")
+        
+        lines.append("=" * 43)
+        lines.append("Legend: P=Player D=Door N=NPC E=Exit G=Grass #=Wall ~=Water .=Passable")
+        
+        # Add spatial context
+        if spatial_data:
+            lines.append("\nSpatial Analysis:")
+            if spatial_data.get('nearby_doors'):
+                lines.append(f"  🚪 Doors: {spatial_data['nearby_doors']}")
+            if spatial_data.get('nearby_npcs'):
+                lines.append(f"  👤 NPCs: {spatial_data['nearby_npcs']}")
+            if spatial_data.get('obstacles'):
+                blocked = [d for d, is_blocked in spatial_data['obstacles'].items() if is_blocked]
+                if blocked:
+                    lines.append(f"  ⛔ Blocked: {', '.join(blocked)}")
+            if spatial_data.get('passable_directions'):
+                lines.append(f"  ✅ Can move: {', '.join(spatial_data['passable_directions'])}")
+        
+        return '\n'.join(lines)
+    
     def _save_llm_log(self, messages: List[Dict[str, Any]], game_state_summary: str):
         """
         Save LLM conversation to a log file.
@@ -480,6 +611,9 @@ CURRENT OBJECTIVES:
         # 🆕 Calculate reward statistics
         reward_stats = self._get_reward_statistics()
         
+        # 🆕 Capture CNN map observation and spatial info
+        map_observation_data = self._capture_map_observation()
+        
         # Create log entry
         log_entry = {
             "call_number": self.llm_call_count,
@@ -488,6 +622,7 @@ CURRENT OBJECTIVES:
             "model": self.llm_model,
             "game_state_summary": game_state_summary,
             "reward_statistics": reward_stats,  # 🆕 Reward tracking
+            "map_observation": map_observation_data,  # 🆕 CNN map and spatial data
             "tool_calls_summary": tool_calls_summary,  # 🆕 Quick reference
             "final_response": final_response,  # 🆕 LLM's final analysis
             "full_conversation": serializable_messages,  # Complete conversation for debugging (JSON serializable)
@@ -506,6 +641,12 @@ CURRENT OBJECTIVES:
                 json.dump(log_entry, f, indent=2, ensure_ascii=False)
             logger.info(f"💾 LLM conversation saved to: {filepath}")
             logger.info(f"   Tools used: {[t['tool'] for t in tool_calls_summary]}")
+            
+            # 🆕 Log map observation capture
+            map_obs = log_entry.get('map_observation', {})
+            if 'error' not in map_obs:
+                spatial = map_obs.get('spatial_analysis', {})
+                logger.info(f"   🗺️  Map captured - Doors: {len(spatial.get('nearby_doors', []))}, NPCs: {len(spatial.get('nearby_npcs', []))}, Passable: {spatial.get('num_passable', 0)}/4")
             
             # 🆕 Log reward statistics
             reward_stats = log_entry.get('reward_statistics', {})
