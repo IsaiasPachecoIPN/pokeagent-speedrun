@@ -93,46 +93,82 @@ class LLMTools:
     # ===== TOOL: Write Objective =====
     def write_objective(
         self,
-        name: str,
-        description: str,
-        type: str,
-        target: dict,
-        reward_weight: float = 1.0
+        name: str = None,
+        description: str = "",
+        type: str = "dialogue",
+        target: dict = None,
+        reward_weight: float = 1.0,
+        **kwargs
     ) -> dict:
+        """Create a new objective. Robust to extra keyword arguments the LLM may supply.
+
+        Accepts additional convenience fields:
+        - keywords / any_match: builds a dialogue/location keyword target dict automatically
+        - location / map_bank / map_number: builds a location target
+        - created_at: overrides creation timestamp
+        - progress / completed: initial state flags (rarely used)
+
+        Unknown fields are ignored but logged for traceability.
         """
-        Create a new objective for the agent to pursue.
-        
-        Args:
-            name: Short name for the objective (e.g., "Talk to Professor Birch")
-            description: Detailed description of what needs to be done
-            type: Type of objective - one of: 'location', 'dialogue', 'item', 'battle', 'custom'
-            target: Dictionary with specific target data. Examples:
-                - For location: {"map": "ROUTE_101", "x": 10, "y": 5}
-                - For dialogue: {"npc": "PROF_BIRCH", "trigger": "talk"}
-                - For item: {"item_id": "POKE_BALL", "count": 5}
-            reward_weight: How much to weight this objective (default 1.0, higher = more important)
-        
-        Returns:
-            Success/failure status
-        """
-        # Generate unique ID
-        obj_id = name.lower().replace(' ', '_')
-        
-        # Create objective
+        # Validate minimal name
+        if not name:
+            return {'success': False, 'message': 'Objective name is required'}
+
+        # Build target if not explicitly provided
+        if target is None:
+            # Dialogue/location keywords shortcut
+            if 'keywords' in kwargs:
+                any_match = kwargs.get('any_match', True)
+                target = {
+                    'keywords': kwargs['keywords'],
+                    'any_match': any_match
+                }
+            # Explicit location shortcut
+            elif 'location' in kwargs:
+                target = {
+                    'location': kwargs['location']
+                }
+                if 'map_bank' in kwargs and 'map_number' in kwargs:
+                    target['map_bank'] = kwargs['map_bank']
+                    target['map_number'] = kwargs['map_number']
+            else:
+                target = {}
+
+        # Generate unique ID; avoid collision by suffixing integer
+        base_id = name.lower().strip().replace(' ', '_')
+        obj_id = base_id
+        counter = 2
+        while obj_id in self.objectives_manager.objectives:
+            obj_id = f"{base_id}_{counter}"
+            counter += 1
+
+        created_at = kwargs.get('created_at')
+        progress = float(kwargs.get('progress', 0.0))
+        completed = bool(kwargs.get('completed', False))
+
+        # Log ignored fields for debugging
+        recognized = {'keywords', 'any_match', 'location', 'map_bank', 'map_number', 'created_at', 'progress', 'completed'}
+        ignored = [k for k in kwargs.keys() if k not in recognized]
+        if ignored:
+            logger.debug(f"write_objective ignoring extra fields: {ignored}")
+
         objective = Objective(
             id=obj_id,
             name=name,
             description=description,
             type=type,
             target=target,
-            reward_weight=reward_weight
+            reward_weight=reward_weight,
+            progress=progress,
+            completed=completed,
+            created_at=created_at
         )
-        
+
         success = self.objectives_manager.add_objective(objective)
-        
         return {
             'success': success,
             'objective_id': obj_id,
+            'target': target,
             'message': f"Objective '{name}' created successfully" if success else f"Failed to create objective '{name}'"
         }
     
