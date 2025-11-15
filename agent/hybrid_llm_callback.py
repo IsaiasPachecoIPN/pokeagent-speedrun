@@ -312,39 +312,74 @@ Be strategic and incremental. Create objectives one at a time based on story flo
     
     def _get_game_state_summary(self) -> str:
         """Get a summary of current game state for the LLM."""
-        
-        # Get training stats
+        # Try to use structured snapshot from environment for richer context
+        snapshot = None
+        try:
+            if hasattr(self.training_env, 'env_method'):
+                # Vectorized env case
+                results = self.training_env.env_method('get_llm_snapshot', indices=[0])
+                if results and isinstance(results, list):
+                    snapshot = results[0]
+            else:
+                env = self.training_env.envs[0] if hasattr(self.training_env, 'envs') else self.training_env
+                if hasattr(env, 'get_llm_snapshot'):
+                    snapshot = env.get_llm_snapshot()
+        except Exception as e:
+            logger.debug(f"LLM snapshot unavailable: {e}")
+
+        # Fallback stats if snapshot missing
         avg_reward = sum(self.episode_rewards[-10:]) / len(self.episode_rewards[-10:]) if self.episode_rewards else 0
         avg_length = sum(self.episode_lengths[-10:]) / len(self.episode_lengths[-10:]) if self.episode_lengths else 0
-        
-        # Build base summary
-        summary = f"""
-TRAINING STATISTICS:
-- Total steps: {self.num_timesteps}
-- Episodes completed: {len(self.episode_rewards)}
-- Average reward (last 10 episodes): {avg_reward:.2f}
-- Average episode length: {avg_length:.0f}
-"""
-        
-        # 🆕 Add spatial context if available
-        env = self.training_env.envs[0] if hasattr(self.training_env, 'envs') else self.training_env
-        if hasattr(env, 'last_spatial_info') and env.last_spatial_info:
+
+        if snapshot:
             try:
-                # Get current game state
-                game_state = env.prev_game_state or {}
-                spatial_context = env.spatial_analyzer.get_spatial_context_for_llm(
-                    env.last_spatial_info,
-                    game_state
+                progress = snapshot.get('progress', {})
+                party = snapshot.get('party', {})
+                nav = snapshot.get('navigation', {})
+                resources = snapshot.get('resources', {})
+                scores = snapshot.get('scores', {})
+                dialogue = snapshot.get('dialogue', {})
+                battle = snapshot.get('battle', {})
+                summary = (
+                    "TRAINING STATISTICS:\n"
+                    f"- Total steps: {self.num_timesteps}\n"
+                    f"- Episodes: {len(self.episode_rewards)}\n"
+                    f"- Avg reward (last 10): {avg_reward:.2f}\n"
+                    f"- Avg episode length (last 10): {avg_length:.0f}\n\n"
+                    "PROGRESS:\n"
+                    f"- Badges ({progress.get('badge_count',0)}): {progress.get('badges', [])}\n"
+                    f"- Milestones ({progress.get('milestone_count',0)}): {progress.get('milestones_completed', [])}\n"
+                    f"- Latest milestone: {progress.get('latest_milestone')} (split {progress.get('latest_split')})\n\n"
+                    "NAVIGATION:\n"
+                    f"- Location: {nav.get('location')} Pos: {nav.get('position')} Facing: {nav.get('facing')}\n"
+                    f"- Doors nearby: {nav.get('doors_nearby')} Passable ratio: {nav.get('passable_ratio')}\n\n"
+                    "PARTY:\n"
+                    f"- Size: {party.get('size')} Avg level: {party.get('avg_level'):.1f} Types: {party.get('type_coverage')}\n"
+                    f"- Members: {party.get('members')}\n\n"
+                    "RESOURCES:\n"
+                    f"- Money: {resources.get('money')} Items: {resources.get('items')} Pokedex caught: {resources.get('pokedex_caught')}\n\n"
+                    "BATTLE:\n"
+                    f"- In battle: {battle.get('in_battle')}\n\n"
+                    "DIALOGUE:\n"
+                    f"- Active: {dialogue.get('dialogue_active')} Text: {dialogue.get('last_dialogue')[:120] if dialogue.get('last_dialogue') else ''}\n\n"
+                    "SCORES:\n"
+                    f"- Progress: {scores.get('progress_score')} Risk: {scores.get('risk_score')} Resource: {scores.get('resource_health')}\n"
                 )
-                summary += f"\nSPATIAL CONTEXT:\n{spatial_context}\n"
+                summary += f"\nCURRENT OBJECTIVES:\n{self.objectives_manager.to_json_str()}\n"
+                return summary
             except Exception as e:
-                logger.debug(f"Could not get spatial context: {e}")
-        
-        # Add objectives
-        summary += f"""
-CURRENT OBJECTIVES:
-{self.objectives_manager.to_json_str()}
-"""
+                logger.debug(f"Failed to format snapshot summary: {e}")
+
+        # Original fallback summary
+        summary = (
+            "TRAINING STATISTICS:\n"
+            f"- Total steps: {self.num_timesteps}\n"
+            f"- Episodes completed: {len(self.episode_rewards)}\n"
+            f"- Average reward (last 10 episodes): {avg_reward:.2f}\n"
+            f"- Average episode length: {avg_length:.0f}\n\n"
+            "CURRENT OBJECTIVES:\n"
+            f"{self.objectives_manager.to_json_str()}\n"
+        )
         return summary
     
     def _on_rollout_end(self) -> None:

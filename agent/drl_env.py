@@ -961,3 +961,143 @@ class PokemonEmeraldEnv(gym.Env):
     def close(self):
         """Clean up resources."""
         self.emulator.stop()
+
+    # === LLM Snapshot Integration ===
+    def get_llm_snapshot(self) -> Dict[str, Any]:
+        """Collect a structured snapshot of environment/game state for LLM strategic planning.
+        Safe, lightweight aggregation using existing emulator/memory_reader helpers.
+        Returns a dictionary with keys: progress, navigation, party, battle, resources, dialogue, scores.
+        """
+        snapshot: Dict[str, Any] = {
+            'progress': {}, 'navigation': {}, 'party': {}, 'battle': {},
+            'resources': {}, 'dialogue': {}, 'scores': {}
+        }
+
+        try:
+            emu = getattr(self, 'emulator', None)
+            reader = emu.memory_reader if emu and hasattr(emu, 'memory_reader') else None
+
+            # --- Progress ---
+            badges = reader.read_badges() if reader else []
+            milestone_tracker = getattr(emu, 'milestone_tracker', None)
+            milestones_completed = []
+            if milestone_tracker and getattr(milestone_tracker, 'milestones', None):
+                milestones_completed = [m for m, data in milestone_tracker.milestones.items() if data.get('completed')]
+            snapshot['progress'] = {
+                'badge_count': len(badges),
+                'badges': badges,
+                'milestone_count': len(milestones_completed),
+                'milestones_completed': milestones_completed,
+                'latest_milestone': getattr(milestone_tracker, 'latest_milestone', None),
+                'latest_split': getattr(milestone_tracker, 'latest_split_time', '00:00:00')
+            }
+
+            # --- Navigation ---
+            position = emu.get_player_position() if emu else None
+            location = reader.read_location() if reader else 'UNKNOWN'
+            facing = reader.read_player_facing() if reader else None
+            map_tiles = emu.get_map_tiles(radius=3) if emu else None
+            doors = 0; grass_tiles = 0; water_tiles = 0; passable = 0; blocked = 0
+            if map_tiles:
+                for row in map_tiles:
+                    for tile in row:
+                        # tile tuple layout: (metatile_id, behavior, collision, elevation) (may vary)
+                        behavior = tile[1] if len(tile) > 1 else None
+                        collision = tile[2] if len(tile) > 2 else 0
+                        if hasattr(behavior, 'name'):
+                            name = behavior.name
+                        else:
+                            name = str(behavior)
+                        if 'DOOR' in name: doors += 1
+                        if 'GRASS' in name: grass_tiles += 1
+                        if 'WATER' in name: water_tiles += 1
+                        if collision == 0: passable += 1
+                        else: blocked += 1
+            snapshot['navigation'] = {
+                'position': position,
+                'location': location,
+                'facing': facing,
+                'doors_nearby': doors,
+                'encounter_grass_tiles': grass_tiles,
+                'water_tiles': water_tiles,
+                'passable_ratio': (passable / (passable + blocked)) if (passable + blocked) > 0 else None
+            }
+
+            # --- Party ---
+            party = emu.get_party_pokemon() if emu else []
+            party_summary = []
+            diversity_types = set()
+            total_level = 0
+            for p in party or []:
+                species = p.get('species')
+                level = p.get('level', 0)
+                max_hp = p.get('max_hp', 1) or 1
+                hp_ratio = p.get('current_hp', 0)/max_hp
+                status = p.get('status', 'OK')
+                types = p.get('types', [])
+                for t in types: diversity_types.add(t)
+                total_level += level
+                party_summary.append({
+                    'species': species,
+                    'level': level,
+                    'hp_ratio': round(hp_ratio, 3),
+                    'status': status,
+                    'types': types
+                })
+            avg_level = total_level / len(party) if party else 0
+            snapshot['party'] = {
+                'size': len(party or []),
+                'avg_level': avg_level,
+                'type_coverage': sorted(list(diversity_types)),
+                'members': party_summary
+            }
+
+            # --- Battle ---
+            in_battle = reader.is_in_battle() if reader else False
+            snapshot['battle'] = {
+                'in_battle': in_battle
+            }
+
+            # --- Resources ---
+            money = emu.get_money() if emu else 0
+            items = reader.read_items() if reader else []
+            item_dict = {name: qty for name, qty in items}
+            pokedex_caught = reader.read_pokedex_caught_count() if reader else 0
+            snapshot['resources'] = {
+                'money': money,
+                'items': item_dict,
+                'pokedex_caught': pokedex_caught
+            }
+
+            # --- Dialogue ---
+            current_dialog = ''
+            try:
+                if hasattr(self, '_get_current_dialog'):
+                    current_dialog = self._get_current_dialog()
+            except Exception:
+                pass
+            snapshot['dialogue'] = {
+                'last_dialogue': current_dialog,
+                'dialogue_active': bool(current_dialog and len(current_dialog.strip()) > 3)
+            }
+
+            # --- Scores (simple composites) ---
+            badge_score = min(len(badges)/8.0, 1.0)
+            milestone_score = min(len(milestones_completed)/30.0, 1.0)
+            progress_score = round(0.6*badge_score + 0.4*milestone_score, 3)
+            avg_hp_ratio = 0.0
+            if party_summary:
+                avg_hp_ratio = sum(m['hp_ratio'] for m in party_summary)/len(party_summary)
+            risk_score = round(1.0 - avg_hp_ratio, 3) if party_summary else 0.0
+            resource_health = round(min(money/50000.0, 1.0), 3)
+            snapshot['scores'] = {
+                'progress_score': progress_score,
+                'risk_score': risk_score,
+                'resource_health': resource_health,
+                'badge_score': round(badge_score, 3),
+                'milestone_score': round(milestone_score, 3)
+            }
+        except Exception as e:
+            snapshot['error'] = f"snapshot_failed: {e}"
+
+        return snapshot
