@@ -156,7 +156,11 @@ class PokemonEmeraldEnv(gym.Env):
         # 🆕 Spatial Awareness System
         self.spatial_analyzer = SpatialAnalyzer()  # Initialized without CNN (will be set later)
         self.last_spatial_info = None  # Cache last spatial analysis
-        
+
+        # Departure penalty configuration (strong penalty for leaving area with unfinished objectives)
+        self.unfinished_departure_penalty = -5.0  # Base penalty magnitude (scaled by objective.reward_weight)
+        self._penalized_departures = set()  # Track (objective_id, from_location)
+
         logger.info(f"Environment created - Action space: {self.action_space}, Observation space: {self.observation_space.shape}")
     
     def reset(
@@ -277,6 +281,33 @@ class PokemonEmeraldEnv(gym.Env):
         }
         
         # Update previous state
+        # Departure penalty (location change with unfinished objectives)
+        try:
+            current_location = None
+            if hasattr(self.emulator, 'memory_reader') and self.emulator.memory_reader:
+                current_location = self.emulator.memory_reader.read_location()
+            prev_location = self.prev_location
+            applied_departure_penalty = 0.0
+            if current_location and prev_location and current_location != prev_location and self.objectives_manager:
+                # Identify location objectives tied to prev_location
+                unfinished_objs = self.objectives_manager.get_location_objectives_for(prev_location)
+                for obj in unfinished_objs:
+                    # Only penalize if not completed and not already penalized for this departure
+                    key = (obj.id, prev_location)
+                    if not obj.completed and key not in self._penalized_departures:
+                        penalty = self.unfinished_departure_penalty * obj.reward_weight
+                        reward += penalty  # Apply penalty directly to this step's reward
+                        applied_departure_penalty += penalty
+                        self._penalized_departures.add(key)
+                        logger.info(f"🚫 Departure penalty applied: left '{prev_location}' with unfinished objective '{obj.name}' ({penalty:.2f})")
+                if applied_departure_penalty != 0.0:
+                    info['departure_penalty'] = applied_departure_penalty
+            # Update prev_location to current after processing
+            if current_location:
+                self.prev_location = current_location
+        except Exception as e:
+            logger.debug(f"Failed to apply departure penalty: {e}")
+
         self.prev_game_state = lightweight_state
         
         # 🆕 Chequear y cachear diálogo en cada step (solo si hay texto)

@@ -183,6 +183,34 @@ class ObjectivesManager:
     def get_active_objectives(self) -> List[Objective]:
         """Get all incomplete objectives."""
         return [obj for obj in self.objectives.values() if not obj.completed]
+
+    def get_location_objectives_for(self, location_name: str) -> List[Objective]:
+        """Return active location objectives that are associated with the given location name.
+        Matching rules:
+        - If objective.type == 'location' and target has 'keywords' and any keyword appears in location_name.
+        - If target has explicit 'location' field matching (case-insensitive substring) location_name.
+        - If target has map_bank/map_number we cannot match by name here (caller should supply bank/number variant if needed).
+        """
+        if not location_name:
+            return []
+        loc_upper = location_name.upper()
+        matched = []
+        for obj in self.get_active_objectives():
+            if obj.type != 'location':
+                continue
+            t = obj.target if isinstance(obj.target, dict) else {}
+            # Keywords matching
+            if 'keywords' in t:
+                kws = t['keywords']
+                if any(str(kw).upper() in loc_upper for kw in kws):
+                    matched.append(obj)
+                    continue
+            # Explicit location string
+            if 'location' in t:
+                target_loc = str(t['location']).upper()
+                if target_loc in loc_upper or loc_upper in target_loc:
+                    matched.append(obj)
+        return matched
     
     def get_completed_objectives(self) -> List[Objective]:
         """Get all completed objectives."""
